@@ -4,3 +4,5 @@
 *test
 *include
 AServerWorkspace*
+#Avoid auto generate platformio .gitignores messing up commits
+*.gitignore

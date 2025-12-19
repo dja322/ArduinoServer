@@ -1,6 +1,9 @@
 #include <Arduino.h>
 #include <WiFi.h>
-#include <WebServer.h>
+
+#include <ESPAsyncWebServer.h>
+#include <AsyncTCP.h>
+
 #include "..\.pio\libdeps\esp32doit-devkit-v1\EspSoftwareSerial\src\SoftwareSerial.h"
 
 #define BAUD_RATE 9600
@@ -13,6 +16,8 @@
 #define rxPin 27
 
 #define ClockPin 34
+
+#define MAX_CLIENTS 10
 
 // HTML content
 const char index_html[] PROGMEM = R"rawliteral(
@@ -39,21 +44,20 @@ function sendCommand() {
 </html>
 )rawliteral";
 
-//Set up Proxy serial
-//SoftwareSerial CCUSerial =  SoftwareSerial(proxy_rxPin, proxy_wxPin);
-
+//Set up Software serial for CentralControlunit
 SoftwareSerial CCUSerial;
+uint32_t clients[MAX_CLIENTS];
+int numClients = 0;
+
+AsyncWebServer server(80);
+AsyncWebSocket ws("/ws");
 
 String ssid = "ESP32-Access-Point";
 String password = "123456789";
-String ExternalWiFissid = "";
-String ExternalWiFiPassword = "";
 
-// Set web server port number to 80
-WebServer server(80);
+bool working = false;
 
-// Variable to store the HTTP request
-String header;
+IPAddress IP;
 
 void setPinModes() {
   pinMode(buttonInput, INPUT_PULLUP);
@@ -84,48 +88,57 @@ bool sendSerialMessage(SoftwareSerial* serial, String buffer) {
   return true;
 }
 
-void handleDataRequest() {
-  if (server.hasArg("value")) {
-    String val = server.arg("value");
-    server.send(200, "text/plain", "Received: " + val);
-  } else {
-    server.send(400, "text/plain", "Missing value");
+void onWsEvent(AsyncWebSocket *server,
+               AsyncWebSocketClient *client,
+               AwsEventType type,
+               void *arg,
+               uint8_t *data,
+               size_t len) {
+
+  if (type == WS_EVT_CONNECT) {
+    Serial.printf("WS client %u connected\n", client->id());
+    clients[numClients] = client->id();
+    numClients++;
+  }
+
+  if (type == WS_EVT_DISCONNECT) {
+    Serial.printf("WS client %u disconnected\n", client->id());
+  }
+
+  if (type == WS_EVT_DATA) {
+    String msg = "";
+    for (size_t i = 0; i < len; i++) {
+      msg += (char)data[i];
+    }
+    Serial.println("WS received: " + msg);
   }
 }
 
-void handleRoot() {
-  server.send_P(200, "text/html", index_html);
-}
-
-bool working = false;
-
-void handleButton() {
-  Serial.println("Button pressed!");
-  server.send(200, "text/plain", "Button received");
-  working = true;
-}
-
-IPAddress IP;
-
 void initWifi() {
-  WiFi.mode(WIFI_AP_STA);
+  WiFi.mode(WIFI_AP);
   IP = WiFi.softAP(ssid, password);
   Serial.print("AP IP address: ");
   Serial.println(IP);
-  
-  WiFi.begin(ExternalWiFissid, ExternalWiFiPassword);
-  while (WiFi.status() != WL_CONNECTED) {
-    Serial.print('.');
-    delay(1000);
-  }
-  Serial.println(WiFi.localIP());
 
-  // Define HTTP api route
-  server.on("/data", HTTP_GET, handleDataRequest);
+  ws.onEvent(onWsEvent);
+  server.addHandler(&ws);
+
   // Route for root page
-  server.on("/", handleRoot);
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(200, "text/html", index_html);
+  });
   //handle button response
-  server.on("/button", handleButton);
+
+  server.on("/button", HTTP_GET, [](AsyncWebServerRequest *request) {
+    Serial.println("Button pressed from browser");
+    working = true;
+
+    // PUSH to all ESP32 clients
+    ws.textAll("WORKING_ON");
+
+    request->send(200, "text/plain", "Button received");
+  });
+
   server.begin();
 }
 
@@ -162,10 +175,6 @@ void loop() {
     digitalWrite(workingLED, LOW);
   }
 
-  server.handleClient();
-
-
-  
 
   //delay(1000); //measured in miliseconds
 }
