@@ -3,7 +3,6 @@
 #include <SD.h>
 #include <SPI.h>
 #include <ArduinoWebsockets.h>
-using namespace websockets;
 
 #define BAUD_RATE 9600
 #define buttonInput 23
@@ -22,7 +21,7 @@ using namespace websockets;
 
 const String ssid = "ESP32-Access-Point";
 const String password = "123456789";
-WebsocketsClient ws;
+websockets::WebsocketsClient ws;
 
 unsigned long previousMillis = 0;
 unsigned long interval = 30000;
@@ -43,7 +42,7 @@ void initWiFi() {
   }
 
   // Message handler
-  ws.onMessage([](WebsocketsMessage message) {
+  ws.onMessage([](websockets::WebsocketsMessage message) {
     Serial.print("Received: ");
     Serial.println(message.data());
 
@@ -52,13 +51,14 @@ void initWiFi() {
     }
   });
 
-  ws.onEvent([](WebsocketsEvent event, String data) {
-    if (event == WebsocketsEvent::ConnectionClosed) {
+  ws.onEvent([](websockets::WebsocketsEvent event, String data) {
+    if (event == websockets::WebsocketsEvent::ConnectionClosed) {
       Serial.println("WebSocket disconnected");
     }
   });
 }
 
+//Set the pin modes
 void setPinModes() {
   pinMode(txPin, OUTPUT);
   pinMode(rxPin, INPUT);
@@ -67,6 +67,7 @@ void setPinModes() {
   pinMode(ClockPin, INPUT);
 }
 
+//initialize SD card for use
 void initSD() {
 
   SPI.begin(SD_SCLK, SD_MISO, SD_MOSI, SD_CS);
@@ -76,15 +77,18 @@ void initSD() {
   } else {
     Serial.println("SD Card MOUNT SUCCESS");
     Serial.println("");
+
     uint32_t cardSize = SD.cardSize() / (1024 * 1024);
     String str = "SDCard Size: " + String(cardSize) + "MB";
     Serial.println(str);
+    
     uint8_t cardType = SD.cardType();
     if(cardType == CARD_NONE) {
       Serial.println("No SD card attached");
     }
+
+    //print card type
     Serial.print("SD Card Type: ");
-    
     if(cardType == CARD_MMC) {
         Serial.println("MMC");
     } else if(cardType == CARD_SD) {
@@ -97,14 +101,21 @@ void initSD() {
   }
 }
 
+//End SD
 void endSD() {
   SD.end();
   SPI.end();
 }
 
-bool writeToFile(String filepath, String content) {
-  File file = SD.open(filepath, FILE_WRITE);
-
+//Write file to SD
+bool writeToFile(String filepath, String content, bool append) {
+  File file;
+  if (append == true) {
+    file = SD.open(filepath, FILE_APPEND);
+  } else {
+    file = SD.open(filepath, FILE_WRITE);
+  }
+  
   if (!file) {
     return false;
   }
@@ -128,15 +139,15 @@ void setup() {
   
   setPinModes();
   
-  
   digitalWrite(BUILTIN_LED, LOW);
   
-  initWiFi();
+  //initialize SD setup 
   initSD();
+  //initialize wifi connection
+  initWiFi();
   
   digitalWrite(BUILTIN_LED, HIGH);
  
-
   Serial.println("Setup complete");
 }
 

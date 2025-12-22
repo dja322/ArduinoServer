@@ -47,6 +47,7 @@ function sendCommand() {
 //Set up Software serial for CentralControlunit
 SoftwareSerial CCUSerial;
 uint32_t clients[MAX_CLIENTS];
+bool newClient = false;
 int numClients = 0;
 
 AsyncWebServer server(80);
@@ -99,6 +100,8 @@ void onWsEvent(AsyncWebSocket *server,
     Serial.printf("WS client %u connected\n", client->id());
     clients[numClients] = client->id();
     numClients++;
+    String str_data = "ID:" + client->id();
+    sendSerialMessage(&CCUSerial, str_data);
   }
 
   if (type == WS_EVT_DISCONNECT) {
@@ -162,7 +165,8 @@ void setup() {
   Serial.println(WiFi.gatewayIP());
 
   delay(1000); //give time for CCU to load up
-  sendSerialMessage(&CCUSerial, WiFi.softAPIP().toString());
+  String data = "IP:" + WiFi.softAPIP().toString();
+  sendSerialMessage(&CCUSerial, data);
 
 }
 
@@ -171,10 +175,7 @@ void loop() {
   if (digitalRead(buttonInput) == LOW || working == true) {
     digitalWrite(workingLED, HIGH);
   } else {
-
     digitalWrite(workingLED, LOW);
   }
-
-
   //delay(1000); //measured in miliseconds
 }
