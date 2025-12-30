@@ -9,10 +9,10 @@
 
 #define workingLED 21
 
-#define SD_MOSI     23
-#define SD_MISO     19
-#define SD_SCLK     18
-#define SD_CS       5
+#define SD_MOSI 23
+#define SD_MISO 19
+#define SD_SCLK 18
+#define SD_CS 5
 
 #define txPin 26
 #define rxPin 27
@@ -26,37 +26,10 @@ websockets::WebsocketsClient ws;
 unsigned long previousMillis = 0;
 unsigned long interval = 30000;
 
-void initWiFi() {
-  WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-
-  bool connected = ws.connect("ws://192.168.4.1/ws");
-
-  if (connected) {
-    Serial.println("WebSocket connected");
-  } else {
-    Serial.println("WebSocket connection failed");
-  }
-
-  // Message handler
-  ws.onMessage([](websockets::WebsocketsMessage message) {
-    Serial.print("Received: ");
-    Serial.println(message.data());
-
-    if (message.data() == "WORKING_ON") {
-      digitalWrite(workingLED, HIGH);
-    }
-  });
-
-  ws.onEvent([](websockets::WebsocketsEvent event, String data) {
-    if (event == websockets::WebsocketsEvent::ConnectionClosed) {
-      Serial.println("WebSocket disconnected");
-    }
-  });
-}
+enum filemode {NONE, REQUEST_FILE, SEND_FILE};
+filemode mode = NONE;
+String currentFileName = "";
+bool written = false;
 
 //Set the pin modes
 void setPinModes() {
@@ -111,9 +84,9 @@ void endSD() {
 bool writeToFile(String filepath, String content, bool append) {
   File file;
   if (append == true) {
-    file = SD.open(filepath, FILE_APPEND);
+    file = SD.open("/" + filepath, FILE_APPEND);
   } else {
-    file = SD.open(filepath, FILE_WRITE);
+    file = SD.open("/" + filepath, FILE_WRITE);
   }
   
   if (!file) {
@@ -128,9 +101,90 @@ bool writeToFile(String filepath, String content, bool append) {
 }
 
 File getFileForRead(String filepath) {
-  File file = SD.open(filepath, FILE_READ);
+  //Open file starting from root directory
+  File file = SD.open("/" + filepath, FILE_READ);
 
   return file;
+}
+
+void processMessage(String data) {
+  digitalWrite(workingLED, HIGH);
+  Serial.printf("Processing data for file: %s, mode: %d. data: %s\n", currentFileName.c_str(), mode, data.c_str());
+
+  if (currentFileName == "") {
+    if (data == "F_REQUEST_FILE") {
+      mode = REQUEST_FILE;
+    } else if (data == "F_SEND_FILE") {
+      mode = SEND_FILE;
+    } else if (mode != NONE) {
+      currentFileName = data;
+    }
+  } 
+  
+  if (currentFileName != "") {
+    if (data == "F_END") {
+      mode = NONE;
+      currentFileName = "";
+      written = false;
+      ws.send("SUCCESS");
+      digitalWrite(workingLED, LOW);
+    } else if (mode == SEND_FILE) {
+      writeToFile(currentFileName, data, written);
+      written = true;
+    } else if (mode == REQUEST_FILE) {
+      Serial.printf("File %s being sent\n", currentFileName.c_str());
+      File f = getFileForRead(currentFileName);
+      char buffer[512 + 1];
+
+      ws.send("F_DELIVERY");
+
+      while (f.available()) {
+        size_t n = f.readBytes(buffer, 512);
+        buffer[n] = '\0';
+        String s = String(buffer);
+        ws.send(s);
+        Serial.printf("Data sent, %s\n", s.c_str()); // Show wifi activity
+      }
+
+      ws.send("F_END");
+      
+      f.close();
+      Serial.printf("File %s sent successfully\n", currentFileName.c_str());
+
+    }
+  }
+}
+
+void initWiFi() {
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  bool connected = ws.connect("ws://192.168.4.1/ws");
+
+  if (connected) {
+    Serial.println("WebSocket connected");
+  } else {
+    Serial.println("WebSocket connection failed");
+  }
+
+  // Message handler
+  ws.onMessage([](websockets::WebsocketsMessage message) {
+    Serial.print("Received: ");
+    Serial.println(message.data());
+
+    processMessage(message.data());
+
+    
+  });
+
+  ws.onEvent([](websockets::WebsocketsEvent event, String data) {
+    if (event == websockets::WebsocketsEvent::ConnectionClosed) {
+      Serial.println("WebSocket disconnected");
+    }
+  });
 }
 
 
